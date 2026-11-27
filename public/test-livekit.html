@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html><head><title>LiveKit Test</title></head><body style="background:#111;color:#fff;font-family:monospace;padding:2rem">
+<h2>LiveKit Connection Test</h2>
+<div id="log" style="white-space:pre-wrap"></div>
+<script type="module">
+import { Room, RoomEvent, Track } from 'https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.min.mjs';
+const log = document.getElementById('log');
+function addLog(msg) { log.textContent += msg + '\n'; console.log(msg); }
+
+async function test() {
+  addLog('Step 1: Getting auth token...');
+  try {
+    const loginRes = await fetch('/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({password: '__STATION_PIN__'})
+    });
+    const loginData = await loginRes.json();
+    addLog('Login: ' + JSON.stringify(loginData));
+    if (!loginData.ok) { addLog('LOGIN FAILED'); return; }
+    
+    addLog('Step 2: Getting LiveKit token...');
+    const lkRes = await fetch('/livekit-token?token=' + encodeURIComponent(loginData.token), {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({room: 'marshallcam', identity: 'test-browser'})
+    });
+    const lkData = await lkRes.json();
+    addLog('LiveKit response: url=' + lkData.url + ' token_len=' + (lkData.token||'').length);
+    if (!lkData.token) { addLog('NO TOKEN RETURNED: ' + JSON.stringify(lkData)); return; }
+
+    addLog('Step 3: Connecting to LiveKit at ' + lkData.url + '...');
+    const room = new Room({adaptiveStream: true, dynacast: true});
+    
+    room.on(RoomEvent.Connected, () => addLog('CONNECTED to LiveKit!'));
+    room.on(RoomEvent.Reconnecting, () => addLog('RECONNECTING...'));
+    room.on(RoomEvent.Reconnected, () => addLog('RECONNECTED'));
+    room.on(RoomEvent.Disconnected, () => addLog('DISCONNECTED'));
+    room.on(RoomEvent.ParticipantConnected, (p) => addLog('Participant joined: ' + p.identity));
+    room.on(RoomEvent.ParticipantDisconnected, (p) => addLog('Participant left: ' + p.identity));
+    room.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      addLog('Track subscribed: ' + track.kind + ' from ' + participant.identity);
+    });
+    room.on(RoomEvent.ConnectionQualityChanged, (q) => addLog('Connection quality: ' + q));
+
+    await room.connect(lkData.url, lkData.token);
+    addLog('Step 4: Connected! Room: ' + room.name + ' Local: ' + room.localParticipant.identity);
+    addLog('Remote participants: ' + room.remoteParticipants.size);
+    
+    addLog('Step 5: Publishing camera+mic...');
+    try {
+      await room.localParticipant.enableCameraAndMicrophone();
+      addLog('Camera+mic PUBLISHED successfully!');
+    } catch(e) {
+      addLog('Publish error: ' + e.message + ' (name=' + e.name + ')');
+    }
+    
+    addLog('TEST COMPLETE. Room is live for 30s then disconnect.');
+    setTimeout(() => { room.disconnect(); addLog('Disconnected after timeout.'); }, 30000);
+  } catch(e) {
+    addLog('ERROR: ' + e.message + '\nStack: ' + (e.stack||''));
+  }
+}
+test();
+</script></body></html>

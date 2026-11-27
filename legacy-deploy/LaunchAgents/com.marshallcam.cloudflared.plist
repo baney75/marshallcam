@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.marshallcam.cloudflared</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/cloudflared</string>
+        <string>tunnel</string>
+        <string>--config</string>
+        <string>/Users/__USER__/.cloudflared/config.yml</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/__USER__</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/__USER__/MarshallOS/cloudflared.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/__USER__/MarshallOS/cloudflared.log</string>
+</dict>
+</plist>

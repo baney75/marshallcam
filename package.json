@@ -1,0 +1,27 @@
+{
+  "name": "marshallos",
+  "version": "2.0.0",
+  "description": "Two-way video intercom for the your family",
+  "main": "MarshallCamServer.js",
+  "scripts": {
+    "start": "node MarshallCamServer.js",
+    "health": "node HealthMonitor.js",
+    "terminal": "node MarshallOS.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Marshall",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "livekit-server-sdk": "^2.15.3",
+    "sharp": "^0.34.5",
+    "speaker": "^0.5.5",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

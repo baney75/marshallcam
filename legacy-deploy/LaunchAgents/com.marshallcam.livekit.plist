@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.marshallcam.livekit</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/livekit-server</string>
+    <string>--config</string>
+    <string>/Users/__USER__/.config/livekit.yaml</string>
+    <string>--dev</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/__USER__/MarshallOS/livekit.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/__USER__/MarshallOS/livekit.log</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/__USER__/MarshallOS</string>
+</dict>
+</plist>
