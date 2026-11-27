@@ -1,95 +1,36 @@
 #!/bin/bash
+# Last-resort PIN entry for the kiosk Web App. Never echo or log the PIN.
 # macOS bash 3.2
-
+set -euo pipefail
 set +x
 
-SOURCE_FILE="/Users/__USER__/MarshallOS/src/MarshallCamServer.ts"
-ENV_FILE="/Users/__USER__/MarshallOS/.env"
-OUT_FILE="/tmp/tv-pin.out"
-BUNDLE_ID="com.apple.Safari.WebApp.__WEBAPP_ID__"
+ROOT=${MARSHALLCAM_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+# shellcheck source=scripts/macos/env.sh
+. "$ROOT/scripts/macos/env.sh"
 
-line=""
-while IFS= read -r current_line || [ -n "$current_line" ]; do
-    case "$current_line" in
-        "const PASSWORD = "*)
-            line=$current_line
-            break
-            ;;
-    esac
-done < "$SOURCE_FILE" 2>/dev/null
-
-pin=""
-literal=""
-quote=""
-in_quote=0
-closed_quote=0
-i=0
-
-# Take only the first quoted string literal on the matching source line.
-while [ "$i" -lt "${#line}" ]; do
-    ch=${line:i:1}
-
-    if [ "$in_quote" -eq 0 ]; then
-        case "$ch" in
-            \"|\'|\`)
-                quote=$ch
-                in_quote=1
-                literal=""
-                ;;
-        esac
-    else
-        if [ "$ch" = "$quote" ]; then
-            closed_quote=1
-            break
-        fi
-        literal="${literal}${ch}"
-    fi
-
-    i=$((i + 1))
-done
-
-if [ "$closed_quote" -eq 1 ]; then
-    case "$literal" in
-        [0-9][0-9][0-9][0-9])
-            pin=$literal
-            ;;
-    esac
+ENV_FILE=${ENV_FILE:-"$ROOT/.env"}
+OUT_FILE=${OUT_FILE:-/tmp/tv-pin.out}
+APP=${KIOSK_APP_PATH:-$(mc_env_get "$ENV_FILE" KIOSK_APP_PATH)}
+[ -n "$APP" ] || APP="$HOME/Applications/MarshallCam.app"
+BUNDLE_ID=${KIOSK_BUNDLE_ID:-$(mc_env_get "$ENV_FILE" KIOSK_BUNDLE_ID)}
+if [ -z "$BUNDLE_ID" ]; then
+  BUNDLE_ID=$(mc_discover_bundle_id "$APP" || true)
 fi
 
-# If no valid literal was found, resolve a direct process.env.NAME reference.
-if [ -z "$pin" ] && [[ "$line" =~ process\.env\.([A-Za-z_][A-Za-z0-9_]*) ]]; then
-    env_name=${BASH_REMATCH[1]}
+pin=$(mc_env_get "$ENV_FILE" STATION_PIN)
 
-    if [ -r "$ENV_FILE" ]; then
-        while IFS= read -r env_line || [ -n "$env_line" ]; do
-            env_line=${env_line%$'\r'}
-
-            case "$env_line" in
-                "$env_name"=*)
-                    env_value=${env_line#*=}
-
-                    case "$env_value" in
-                        \"*\"|\'*\')
-                            env_value=${env_value#?}
-                            env_value=${env_value%?}
-                            ;;
-                    esac
-
-                    case "$env_value" in
-                        [0-9][0-9][0-9][0-9])
-                            pin=$env_value
-                            break
-                            ;;
-                    esac
-                    ;;
-            esac
-        done < "$ENV_FILE"
-    fi
-fi
-
-if [ -z "$pin" ]; then
+case "$pin" in
+  [0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9]|[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+    ;;
+  *)
     printf '%s\n' "no pin" > "$OUT_FILE"
     exit 1
+    ;;
+esac
+
+if [ -z "$BUNDLE_ID" ]; then
+  printf '%s\n' "no bundle" > "$OUT_FILE"
+  exit 1
 fi
 
 result=$(
@@ -141,5 +82,6 @@ result=$(
 )
 
 pin=""
+unset PIN
 printf '%s\n' "$result" > "$OUT_FILE"
 exit 0

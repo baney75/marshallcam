@@ -8,6 +8,14 @@ import {
   type RemoteTrackPublication, VideoPresets,
   type DataPublishOptions,
 } from 'livekit-client'
+import {
+  bootstrapAuth,
+  detectRole,
+  localStorageTokenStore,
+  recoverStationToken,
+  type Role,
+} from './authBootstrap'
+import { getSharedMediaStream } from './media'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -26,8 +34,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
     return this.props.children
   }
 }
-
-type Role = 'remote' | 'station'
 
 type CallState =
   | { status: 'idle' }
@@ -59,6 +65,8 @@ interface TileCaller {
 }
 
 const LIVEKIT_ROOM = 'marshallcam'
+const DEFAULT_APP_NAME = 'MarshallCam'
+const DEFAULT_TAGLINE = 'Two-way video intercom'
 
 function playSqueakyToy() {
   try {
@@ -96,43 +104,52 @@ function playSqueakyToy() {
 
 const SQUEAK_DATA = new TextEncoder().encode(JSON.stringify({ type: 'squeak' }))
 
-function getStoredToken(): string {
-  return localStorage.getItem('mc_token') || ''
-}
-
-function clearStoredToken() {
-  localStorage.removeItem('mc_token')
-}
-
-function detectRole(): Role {
-  const params = new URLSearchParams(location.search)
-  const explicit = params.get('role')
-  if (explicit === 'station') return 'station'
-  if (explicit === 'remote') return 'remote'
-  const host = location.hostname
-  if (host === 'localhost' || host === '127.0.0.1' || host === '__SERVER_LAN_IP__' || host.startsWith('10.') || host.startsWith('192.168.')) {
-    return 'station'
-  }
-  return 'remote'
-}
-
-async function fetchLiveKitToken(authToken: string, identity: string): Promise<{ token: string; url: string; iceServers: RTCIceServer[] }> {
-  console.log('[MarshallCam] fetchLiveKitToken: identity=', identity, 'token_len=', authToken.length)
-  const r = await fetch(`/livekit-token?token=${encodeURIComponent(authToken)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({ room: LIVEKIT_ROOM, identity }),
+async function publishCachedMedia(room: Room, video: MediaTrackConstraints | boolean = true): Promise<void> {
+  const stream = await getSharedMediaStream({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    video,
   })
-  console.log('[MarshallCam] fetchLiveKitToken: status=', r.status, r.statusText)
+  const pubVideo = room.localParticipant.getTrackPublication(Track.Source.Camera)
+  const pubMic = room.localParticipant.getTrackPublication(Track.Source.Microphone)
+  const videoTrack = stream.getVideoTracks()[0]
+  const audioTrack = stream.getAudioTracks()[0]
+  if (videoTrack && !pubVideo?.track) {
+    await room.localParticipant.publishTrack(videoTrack, { source: Track.Source.Camera })
+  }
+  if (audioTrack && !pubMic?.track) {
+    await room.localParticipant.publishTrack(audioTrack, { source: Track.Source.Microphone })
+  }
+}
+
+async function fetchLiveKitToken(
+  authToken: string,
+  identity: string,
+  opts?: { role?: Role; onToken?: (token: string) => void },
+): Promise<{ token: string; url: string; iceServers: RTCIceServer[] }> {
+  let current = authToken
+  const request = async (token: string) => {
+    const r = await fetch(`/livekit-token?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ room: LIVEKIT_ROOM, identity }),
+    })
+    return r
+  }
+  let r = await request(current)
+  if (r.status === 401 && opts?.role === 'station') {
+    const next = await recoverStationToken(fetch, localStorageTokenStore)
+    if (next) {
+      current = next
+      opts.onToken?.(next)
+      r = await request(current)
+    }
+  }
   if (!r.ok) {
     const text = await r.text().catch(() => '')
-    console.error('[MarshallCam] fetchLiveKitToken FAILED:', r.status, text)
     throw new Error(`Auth failed (${r.status}): ${text}`)
   }
-  const data = await r.json()
-  console.log('[MarshallCam] fetchLiveKitToken: url=', data.url, 'iceServers=', data.iceServers?.length, 'token_len=', (data.token || '').length)
-  return data
+  return r.json()
 }
 
 function attachAudioTrack(track: Track, label: string) {
@@ -216,7 +233,7 @@ function useLiveKitRoom(authToken: string, identity: string, publishMedia: boole
     setCamStatus('connecting')
 
     try {
-      const { token, url, iceServers } = await fetchLiveKitToken(authToken, identity)
+      const { token, url, iceServers } = await fetchLiveKitToken(authToken, identity, { role: 'remote' })
       console.log('[MarshallCam] connect: got token, connecting to', url, 'with', iceServers?.length, 'ICE servers')
       const room = new Room({
         adaptiveStream: true,
@@ -436,7 +453,7 @@ function useLiveKitRoom(authToken: string, identity: string, publishMedia: boole
       if (publishMedia) {
         try {
           console.log('[MarshallCam] Remote: enabling camera and microphone...')
-          await room.localParticipant.enableCameraAndMicrophone()
+          await publishCachedMedia(room)
           const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera)
           const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
           console.log('[MarshallCam] Remote: camera published=', !!camPub?.track, 'mic published=', !!micPub?.track)
@@ -572,7 +589,7 @@ function useLiveKitRoom(authToken: string, identity: string, publishMedia: boole
   }
 }
 
-function PinLogin({ onAuth }: { onAuth: (token: string) => void }) {
+function PinLogin({ onAuth, tagline }: { onAuth: (token: string) => void; tagline: string }) {
   const [pin, setPin] = useState('')
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
@@ -661,7 +678,7 @@ function PinLogin({ onAuth }: { onAuth: (token: string) => void }) {
           })}
         </div>
 
-        <p className="pin-footer">TWO-WAY VIDEO INTERCOM</p>
+        <p className="pin-footer">{tagline.toUpperCase()}</p>
       </div>
     </div>
   )
@@ -882,7 +899,7 @@ function RemoteCallView({ token }: { token: string }) {
   )
 }
 
-function StationView({ token }: { token: string }) {
+function StationView({ token, onToken, appName }: { token: string; onToken: (token: string) => void; appName: string }) {
   const [familyIdentities, setFamilyIdentities] = useState<string[]>([])
   const [lkStatus, setLkStatus] = useState<'waiting' | 'connecting' | 'connected' | 'error'>('waiting')
   const [time, setTime] = useState(new Date())
@@ -905,7 +922,7 @@ function StationView({ token }: { token: string }) {
       try {
         console.log('[MarshallCam] Station: fetching LiveKit token...')
         setLkStatus('connecting')
-        const { token: lkToken, url, iceServers } = await fetchLiveKitToken(token, identity)
+        const { token: lkToken, url, iceServers } = await fetchLiveKitToken(token, identity, { role: 'station', onToken })
         console.log('[MarshallCam] Station: connecting to', url, 'with', iceServers?.length, 'ICE servers')
         const room = new Room({
           adaptiveStream: true,
@@ -1041,12 +1058,12 @@ function StationView({ token }: { token: string }) {
 
         try {
           console.log('[MarshallCam] Station: enabling camera and microphone...')
-          await room.localParticipant.enableCameraAndMicrophone()
+          await publishCachedMedia(room, { width: { ideal: 1920 }, height: { ideal: 1080 } })
           const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera)
           const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
           console.log('[MarshallCam] Station: camera published=', !!camPub?.track, 'mic published=', !!micPub?.track)
         } catch (e: any) {
-          console.error('[MarshallCam] Station: enableCameraAndMicrophone failed:', e.name, e.message)
+          console.error('[MarshallCam] Station: camera/mic failed:', e.name, e.message)
         }
       } catch (e: any) {
         console.error('[MarshallCam] Station: connection error:', e.message, e.stack)
@@ -1065,7 +1082,17 @@ function StationView({ token }: { token: string }) {
       roomRef.current?.disconnect()
       roomRef.current = null
     }
-  }, [token, identity, tryFullscreen])
+  }, [token, identity, tryFullscreen, onToken])
+
+  useEffect(() => {
+    if (lkStatus !== 'connected') return
+    const beat = () => {
+      void fetch('/station/heartbeat', { method: 'POST', credentials: 'include' }).catch(() => {})
+    }
+    beat()
+    const id = setInterval(beat, 15_000)
+    return () => clearInterval(id)
+  }, [lkStatus])
 
   useEffect(() => {
     let wakeLock: WakeLockSentinel | null = null
@@ -1116,7 +1143,7 @@ function StationView({ token }: { token: string }) {
           {lkStatus === 'connected' && 'AWAITING CALL'}
           {lkStatus === 'error' && 'RECONNECTING...'}
         </div>
-        <div className="station-paw">MARSHALLCAM</div>
+        <div className="station-paw">{appName.toUpperCase()}</div>
         <div className="station-clock-glow" />
       </div>
 
@@ -1156,43 +1183,61 @@ function App() {
   const [authed, setAuthed] = useState(false)
   const [token, setToken] = useState('')
   const [checking, setChecking] = useState(true)
+  const [tagline, setTagline] = useState(DEFAULT_TAGLINE)
+  const [appName, setAppName] = useState(DEFAULT_APP_NAME)
   const role = useMemo(() => detectRole(), [])
 
   useEffect(() => {
+    void fetch('/app').then(async (r) => {
+      if (!r.ok) return
+      const data = await r.json() as { name?: string; tagline?: string }
+      if (data.name) setAppName(data.name)
+      if (data.tagline) setTagline(data.tagline)
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
     const urlParams = new URLSearchParams(location.search)
     const urlToken = urlParams.get('token')
     if (urlToken) {
-      console.log('[MarshallCam] Auth: using URL token')
+      localStorageTokenStore.set(urlToken)
       setToken(urlToken)
       setAuthed(true)
       setChecking(false)
       return
     }
-    const saved = getStoredToken()
-    if (saved) {
-      console.log('[MarshallCam] Auth: checking stored token...')
-      fetch(`/status?token=${saved}`, { credentials: 'include' }).then(r => {
-        if (r.ok) {
-          console.log('[MarshallCam] Auth: stored token valid')
-          setToken(saved)
-          setAuthed(true)
-        } else {
-          console.log('[MarshallCam] Auth: stored token invalid, clearing')
-          clearStoredToken()
-        }
-      }).catch((e) => {
-        console.error('[MarshallCam] Auth check failed:', e)
-        clearStoredToken()
-      }).finally(() => setChecking(false))
-    } else {
-      console.log('[MarshallCam] Auth: no stored token, showing login')
+
+    void bootstrapAuth({
+      role,
+      storedToken: localStorageTokenStore.get(),
+      fetch,
+      store: localStorageTokenStore,
+      onStatus: (status) => {
+        if (cancelled) return
+        if (status === 'connecting') setChecking(true)
+      },
+    }).then((result) => {
+      if (cancelled) return
+      if (result.status === 'authed') {
+        setToken(result.token)
+        setAuthed(true)
+      } else {
+        setAuthed(false)
+      }
       setChecking(false)
-    }
-  }, [])
+    }).catch(() => {
+      if (cancelled) return
+      setAuthed(false)
+      setChecking(false)
+    })
+
+    return () => { cancelled = true }
+  }, [role])
 
   const handleAuth = useCallback((t: string) => {
     setToken(t)
-    localStorage.setItem('mc_token', t)
+    localStorageTokenStore.set(t)
     setAuthed(true)
   }, [])
 
@@ -1200,15 +1245,16 @@ function App() {
     return (
       <div className="pin-screen">
         <Loader2 className="w-8 h-8 text-[var(--accent)] animate-spin" />
+        <p className="pin-footer" style={{ marginTop: '1.5rem' }}>Connecting to server…</p>
       </div>
     )
   }
 
   if (authed) {
     return role === 'station'
-      ? <StationView token={token} />
+      ? <StationView token={token} onToken={handleAuth} appName={appName} />
       : <RemoteCallView token={token} />
   }
 
-  return <PinLogin onAuth={handleAuth} />
+  return <PinLogin onAuth={handleAuth} tagline={tagline} />
 }

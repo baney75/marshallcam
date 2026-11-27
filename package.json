@@ -1,26 +1,39 @@
 {
-  "name": "marshallos",
-  "version": "2.0.0",
-  "description": "Two-way video intercom for the your family",
-  "main": "MarshallCamServer.js",
+  "name": "marshallcam",
+  "version": "3.0.0",
+  "description": "Self-hosted two-way video intercom for a TV kiosk (LiveKit + macOS)",
+  "main": "src/MarshallCamServer.ts",
   "scripts": {
-    "start": "node MarshallCamServer.js",
-    "health": "node HealthMonitor.js",
-    "terminal": "node MarshallOS.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "tsx src/MarshallCamServer.ts",
+    "build": "npm --prefix client run build && npm --prefix client-max run build",
+    "typecheck": "tsc --noEmit && npm --prefix client run typecheck && npm --prefix client-max run typecheck",
+    "test": "tsx --test test/*.test.ts && npm --prefix client test",
+    "lint:sh": "if command -v shellcheck >/dev/null 2>&1; then shellcheck -x scripts/*.sh scripts/macos/*.sh; else echo 'shellcheck not installed; skipping'; fi"
   },
-  "keywords": [],
-  "author": "Marshall",
-  "license": "ISC",
+  "keywords": [
+    "livekit",
+    "intercom",
+    "kiosk",
+    "webrtc"
+  ],
+  "author": "baney75",
+  "license": "MIT",
+  "private": false,
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "livekit-server-sdk": "^2.15.3",
     "sharp": "^0.34.5",
-    "speaker": "^0.5.5",
     "ws": "^8.20.0"
+  },
+  "optionalDependencies": {
+    "speaker": "^0.5.5"
   },
   "devDependencies": {
     "@types/node": "^25.6.1",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }

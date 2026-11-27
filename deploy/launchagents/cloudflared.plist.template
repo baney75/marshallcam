@@ -3,27 +3,31 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.marshallcam.cloudflared</string>
+    <string>{{LABEL_PREFIX}}.cloudflared</string>
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/cloudflared</string>
         <string>tunnel</string>
         <string>--config</string>
-        <string>/Users/__USER__/.cloudflared/config.yml</string>
+        <string>{{HOME}}/.cloudflared/config.yml</string>
         <string>run</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/__USER__</string>
+        <string>{{HOME}}</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>/Users/__USER__/MarshallOS/cloudflared.log</string>
+    <string>{{LOG_DIR}}/cloudflared.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/__USER__/MarshallOS/cloudflared.log</string>
+    <string>{{LOG_DIR}}/cloudflared.log</string>
 </dict>
 </plist>

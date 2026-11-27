@@ -1,21 +1,43 @@
 #!/bin/bash
-# AV_Lock.sh - CoreAudio hardware lock for MarshallCam
-# Locks: Input = C922 Pro Stream Webcam, Output = HDMI (100012589)
-# Runs periodically to survive device reconnections
+# CoreAudio hardware lock. Skips when AV_INPUT_DEVICE / AV_OUTPUT_DEVICE are unset.
+set -euo pipefail
 
-KIOSK_DIR="$HOME/MarshallOS"
-LOG_FILE="$KIOSK_DIR/avlock.log"
+ROOT=${MARSHALLCAM_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
+# shellcheck source=scripts/macos/env.sh
+. "$ROOT/scripts/macos/env.sh"
 
-[ -f "$LOG_FILE" ] && [ "$(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)" -gt 1048576 ] && mv "$LOG_FILE" "$LOG_FILE.old"
+ENV_FILE=${ENV_FILE:-"$ROOT/.env"}
+LOG_DIR=${LOG_DIR:-$(mc_env_get "$ENV_FILE" LOG_DIR)}
+[ -n "$LOG_DIR" ] || LOG_DIR="$ROOT/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/avlock.log"
+
+if [ -f "$LOG_FILE" ]; then
+  size=$(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)
+  case "$size" in
+    ''|*[!0-9]*) size=0 ;;
+  esac
+  if [ "$size" -gt 1048576 ]; then
+    mv "$LOG_FILE" "$LOG_FILE.old"
+  fi
+fi
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [AV_Lock] $1" >> "$LOG_FILE"; }
 
-osascript -e "set volume output volume 100" 2>/dev/null
-osascript -e "set volume input volume 100" 2>/dev/null
+INPUT_DEVICE=${AV_INPUT_DEVICE:-$(mc_env_get "$ENV_FILE" AV_INPUT_DEVICE)}
+OUTPUT_DEVICE=${AV_OUTPUT_DEVICE:-$(mc_env_get "$ENV_FILE" AV_OUTPUT_DEVICE)}
+
+if [ -z "$INPUT_DEVICE" ] && [ -z "$OUTPUT_DEVICE" ]; then
+  log "AV_INPUT_DEVICE and AV_OUTPUT_DEVICE unset; skipping"
+  exit 0
+fi
+
+osascript -e "set volume output volume 100" 2>/dev/null || true
+osascript -e "set volume input volume 100" 2>/dev/null || true
 
 lock_audio() {
-/usr/bin/python3 << 'PYEOF'
-import sys, ctypes
+INPUT_DEVICE="$INPUT_DEVICE" OUTPUT_DEVICE="$OUTPUT_DEVICE" /usr/bin/python3 << 'PYEOF'
+import os, sys, ctypes
 from ctypes import c_uint32, c_void_p, byref, sizeof
 ca = ctypes.CDLL('/System/Library/Frameworks/CoreAudio.framework/CoreAudio')
 cf = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
@@ -45,29 +67,31 @@ def setdev(d,inp):
 def setsys(d):
     a=Addr(DSYS,GLOBAL,ELEM0); dv=c_uint32(d)
     return ca.AudioObjectSetPropertyData(SYS,byref(a),0,None,sizeof(c_uint32),byref(dv))==0
+want_in=os.environ.get('INPUT_DEVICE') or ''
+want_out=os.environ.get('OUTPUT_DEVICE') or ''
 dd=devs(); iid=oid=None
 for did,nm in dd:
-    if nm=='C922 Pro Stream Webcam': iid=did
-    if nm=='100012589': oid=did
+    if want_in and nm==want_in: iid=did
+    if want_out and nm==want_out: oid=did
 ok=True
-if iid and setdev(iid,True): print(f'Input locked: C922 (ID {iid})')
-else: print(f'Input FAIL: C922'); ok=False
-if oid and setdev(oid,False): print(f'Output locked: HDMI (ID {oid})')
-else: print(f'Output FAIL: HDMI'); ok=False
-if oid and setsys(oid): print(f'System output locked: HDMI')
+if want_in:
+    if iid and setdev(iid,True): print(f'Input locked: {want_in} (ID {iid})')
+    else: print(f'Input FAIL: {want_in}'); ok=False
+if want_out:
+    if oid and setdev(oid,False): print(f'Output locked: {want_out} (ID {oid})')
+    else: print(f'Output FAIL: {want_out}'); ok=False
+    if oid and setsys(oid): print(f'System output locked: {want_out}')
 sys.exit(0 if ok else 1)
 PYEOF
 }
 
-# Initial lock
-log "Applying initial AV lock..."
-lock_audio >> "$LOG_FILE" 2>&1
+log "Applying AV lock..."
+lock_audio >> "$LOG_FILE" 2>&1 || true
 
-# Continuous monitoring loop
 while true; do
     sleep 15
-    osascript -e "set volume output volume 100" 2>/dev/null
-    osascript -e "set volume input volume 100" 2>/dev/null
-    result=$(lock_audio 2>&1)
+    osascript -e "set volume output volume 100" 2>/dev/null || true
+    osascript -e "set volume input volume 100" 2>/dev/null || true
+    result=$(lock_audio 2>&1 || true)
     log "$result"
 done

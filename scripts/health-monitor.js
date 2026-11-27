@@ -3,16 +3,18 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
-const KIOSK_DIR = path.join(process.env.HOME, 'MarshallOS');
-const LOG_FILE = path.join(KIOSK_DIR, 'healthmonitor.log');
-const PORT = 9999;
+const ROOT = process.env.MARSHALLCAM_ROOT || path.resolve(__dirname, '..');
+const LOG_DIR = process.env.LOG_DIR || path.join(ROOT, 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'healthmonitor.log');
+const PORT = Number(process.env.HEALTH_MONITOR_PORT || 9999);
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] [HealthMonitor] ${msg}`;
   console.log(line);
   try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
     fs.appendFileSync(LOG_FILE, line + '\n');
-  } catch (e) {}
+  } catch (e) { /* noop */ }
 }
 
 function getLogTail(filename, lines = 50) {
@@ -44,34 +46,25 @@ function getProcessInfo(pattern) {
   });
 }
 
-function getUptime() {
-  try {
-    const uptime = fs.readFileSync('/proc/uptime', 'utf8');
-    return Math.floor(parseFloat(uptime.split(' ')[0]));
-  } catch (e) {
-    return null;
-  }
-}
-
 async function buildDashboard() {
-  const kioskInfo = await getProcessInfo('MarshallCam.js');
-  const watchdogInfo = await getProcessInfo('Watchdog.sh');
-  const avlockInfo = await getProcessInfo('AV_Lock.sh');
-  const healthInfo = await getProcessInfo('HealthMonitor');
-  
-  const kioskLogs = getLogTail(path.join(KIOSK_DIR, 'kiosk.log'), 30);
-  const watchdogLogs = getLogTail(path.join(KIOSK_DIR, 'watchdog.log'), 20);
-  const avlockLogs = getLogTail(path.join(KIOSK_DIR, 'avlock.log'), 20);
-  
+  const serverInfo = await getProcessInfo('MarshallCamServer');
+  const guardInfo = await getProcessInfo('kiosk-guard.sh');
+  const avlockInfo = await getProcessInfo('av-lock.sh');
+  const healthInfo = await getProcessInfo('health-monitor');
+
+  const serverLogs = getLogTail(path.join(LOG_DIR, 'marshallcam.log'), 30);
+  const guardLogs = getLogTail(path.join(LOG_DIR, 'kiosk-guard.log'), 20);
+  const avlockLogs = getLogTail(path.join(LOG_DIR, 'avlock.log'), 20);
+
   const statusColor = (running) => running ? '#2ecc71' : '#e74c3c';
   const statusText = (running) => running ? 'RUNNING' : 'DOWN';
-  
+
   return `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="refresh" content="10">
-    <title>Marshall | MarshallCam Kiosk Health</title>
+    <title>MarshallCam Health</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #eee; margin: 0; padding: 20px; }
         h1 { color: #3498db; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
@@ -85,19 +78,19 @@ async function buildDashboard() {
     </style>
 </head>
 <body>
-    <h1>Marshall | MarshallCam Kiosk Health Monitor</h1>
+    <h1>MarshallCam Kiosk Health</h1>
     <div class="grid">
         <div class="card">
             <h2>MarshallCam</h2>
-            <div class="status" style="color: ${statusColor(kioskInfo.running)}">${statusText(kioskInfo.running)}</div>
-            <div>PID: <span class="metric">${kioskInfo.pid || 'N/A'}</span></div>
-            <div>Memory: <span class="metric">${kioskInfo.mem ? kioskInfo.mem + 'KB' : 'N/A'}</span></div>
-            <div>CPU: <span class="metric">${kioskInfo.cpu ? kioskInfo.cpu + '%' : 'N/A'}</span></div>
+            <div class="status" style="color: ${statusColor(serverInfo.running)}">${statusText(serverInfo.running)}</div>
+            <div>PID: <span class="metric">${serverInfo.pid || 'N/A'}</span></div>
+            <div>Memory: <span class="metric">${serverInfo.mem ? serverInfo.mem + 'KB' : 'N/A'}</span></div>
+            <div>CPU: <span class="metric">${serverInfo.cpu ? serverInfo.cpu + '%' : 'N/A'}</span></div>
         </div>
         <div class="card">
-            <h2>Watchdog</h2>
-            <div class="status" style="color: ${statusColor(watchdogInfo.running)}">${statusText(watchdogInfo.running)}</div>
-            <div>PID: <span class="metric">${watchdogInfo.pid || 'N/A'}</span></div>
+            <h2>Kiosk Guard</h2>
+            <div class="status" style="color: ${statusColor(guardInfo.running)}">${statusText(guardInfo.running)}</div>
+            <div>PID: <span class="metric">${guardInfo.pid || 'N/A'}</span></div>
         </div>
         <div class="card">
             <h2>AV Lock</h2>
@@ -111,16 +104,20 @@ async function buildDashboard() {
             <div>Port: <span class="metric">${PORT}</span></div>
         </div>
         <div class="card">
-            <h2>Kiosk Logs</h2>
-            <div class="logs">${kioskLogs.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <h2>Server Logs</h2>
+            <div class="logs">${serverLogs.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         </div>
         <div class="card">
-            <h2>Watchdog Logs</h2>
-            <div class="logs">${watchdogLogs.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            <h2>Guard Logs</h2>
+            <div class="logs">${guardLogs.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </div>
+        <div class="card">
+            <h2>AV Lock Logs</h2>
+            <div class="logs">${avlockLogs.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         </div>
     </div>
     <div class="footer">
-        Marshall Systems Architect | Last update: ${new Date().toLocaleString()} | Auto-refresh: 10s
+        Last update: ${new Date().toISOString()} | Auto-refresh: 10s
     </div>
 </body>
 </html>`;
@@ -137,11 +134,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  log(`Health monitor listening on http://0.0.0.0:${PORT}`);
+server.listen(PORT, '127.0.0.1', () => {
+  log(`Health monitor listening on http://127.0.0.1:${PORT}`);
 });
 
-// Rotate log file if too large
 setInterval(() => {
   try {
     const stats = fs.statSync(LOG_FILE);
@@ -149,7 +145,7 @@ setInterval(() => {
       fs.renameSync(LOG_FILE, LOG_FILE + '.old');
       log('Log rotated.');
     }
-  } catch (e) {}
-}, 3600000); // Check every hour
+  } catch (e) { /* noop */ }
+}, 3600000);
 
 log('HealthMonitor initialized.');

@@ -1,0 +1,14 @@
+# Copy to ~/.cloudflared/config.yml after creating a tunnel.
+# Replace <TUNNEL-ID> and example.com hostnames. Do not commit real IDs.
+
+tunnel: <TUNNEL-ID>
+credentials-file: /home/user/.cloudflared/<TUNNEL-ID>.json
+
+ingress:
+  - hostname: cam.example.com
+    service: http://localhost:3000
+  - hostname: admin.example.com
+    service: http://localhost:3000
+  - hostname: livekit.example.com
+    service: http://localhost:7880
+  - service: http_status:404

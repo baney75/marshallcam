@@ -3,26 +3,28 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.marshallcam.marshallcam</string>
+    <string>{{LABEL_PREFIX}}.guard</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/__USER__/MarshallOS/node_modules/.bin/tsx</string>
-        <string>/Users/__USER__/MarshallOS/src/MarshallCamServer.ts</string>
+        <string>/bin/bash</string>
+        <string>{{ROOT}}/scripts/macos/kiosk-guard.sh</string>
     </array>
+    <key>WorkingDirectory</key>
+    <string>{{ROOT}}</string>
     <key>RunAtLoad</key>
     <true/>
-    <key>KeepAlive</key>
-    <true/>
+    <key>StartInterval</key>
+    <integer>60</integer>
     <key>EnvironmentVariables</key>
     <dict>
+        <key>HOME</key>
+        <string>{{HOME}}</string>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <key>HOME</key>
-        <string>/Users/__USER__</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>/Users/__USER__/MarshallOS/marshallcam.log</string>
+    <string>{{LOG_DIR}}/kiosk-guard.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/__USER__/MarshallOS/marshallcam.log</string>
+    <string>{{LOG_DIR}}/kiosk-guard.log</string>
 </dict>
 </plist>
