@@ -1,0 +1,15 @@
+.env
+data/
+logs/
+*.log
+node_modules/
+public/client/
+public/max/
+.tvguard/
+dist/
+.DS_Store
+*.tsbuildinfo
+.npm
+coverage/
+client/dist/
+client-max/dist/

@@ -3,19 +3,15 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.marshallcam.avlock</string>
+    <string>{{LABEL_PREFIX}}.caffeinate</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/Users/__USER__/MarshallOS/AV_Lock.sh</string>
+        <string>/usr/bin/caffeinate</string>
+        <string>-sid</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
-    <string>/Users/__USER__/MarshallOS/avlock.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/__USER__/MarshallOS/avlock.log</string>
 </dict>
 </plist>

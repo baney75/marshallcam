@@ -57,7 +57,7 @@ function PasswordLogin({ onAuth }: { onAuth: (token: string) => void }) {
       <Card className={cn("w-full max-w-[380px]", shake && "animate-[shake_0.5s_ease-in-out]")}>
         <CardHeader className="text-center">
           <Shield className="mx-auto mb-2 text-primary" size={28} />
-          <CardTitle className="text-xl font-light tracking-tight">MarshallOS</CardTitle>
+          <CardTitle className="text-xl font-light tracking-tight">MarshallCam Admin</CardTitle>
           <CardDescription>System Control Surface</CardDescription>
         </CardHeader>
         <CardContent>
@@ -149,7 +149,7 @@ function TerminalView() {
         {messages.length === 0 && (
           <div className="text-center mt-[30%] text-muted-foreground text-sm">
             <Terminal size={32} className="mx-auto mb-2 text-primary/30" />
-            <p className="font-medium">MarshallOS Debug Terminal</p>
+            <p className="font-medium">Admin Debug Terminal</p>
             <p className="text-xs mt-1">Diagnose services, inspect configs, run commands</p>
           </div>
         )}
@@ -301,8 +301,8 @@ function TvView() {
         <CardContent className="py-3 flex items-center gap-3">
           <Tv size={18} className="text-primary" />
           <div>
-            <p className="text-sm font-medium">ONN 32" Roku TV</p>
-            <p className="text-xs text-muted-foreground">__TV_IP__:8060</p>
+            <p className="text-sm font-medium">Roku TV</p>
+            <p className="text-xs text-muted-foreground">ECP control</p>
           </div>
           <ChevronRight size={14} className="ml-auto text-muted-foreground" />
         </CardContent>
@@ -403,7 +403,7 @@ export default function App() {
         <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             <Shield size={16} className="text-primary" />
-            <span className="font-semibold text-sm tracking-tight">MarshallOS</span>
+            <span className="font-semibold text-sm tracking-tight">Admin</span>
           </div>
           <TabsList variant="line">
             <TabsTrigger value="terminal"><Terminal size={14} /> Terminal</TabsTrigger>

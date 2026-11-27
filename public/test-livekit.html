@@ -13,7 +13,7 @@ async function test() {
     const loginRes = await fetch('/login', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       credentials: 'include',
-      body: JSON.stringify({password: '__STATION_PIN__'})
+      body: JSON.stringify({password: prompt('Station PIN') || ''})
     });
     const loginData = await loginRes.json();
     addLog('Login: ' + JSON.stringify(loginData));
