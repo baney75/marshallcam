@@ -13,8 +13,13 @@ Self-hosted two-way video intercom: a TV kiosk at home so you can see and talk t
 The kiosk is a Mac mini (or any Mac) on HDMI, running a Safari Web App that publishes a USB webcam. Remotes are a PWA on phones. Media is [LiveKit](https://livekit.io/). The Node server issues tokens, serves the apps, and optionally talks to a Roku TV over ECP.
 
 ![Station standby](docs/screenshots/station.png)
+*Station standby view on the TV kiosk.*
 
 ![Remote call](docs/screenshots/remote.png)
+*Remote client in an active two-way call with the station (synthetic test-pattern video feeds).*
+
+![Admin dashboard](docs/screenshots/admin.png)
+*Optional admin dashboard at `/max` showing service health and Roku TV status.*
 
 ## Features
 
