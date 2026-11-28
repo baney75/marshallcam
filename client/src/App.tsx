@@ -16,6 +16,11 @@ import {
   type Role,
 } from './authBootstrap'
 import { getSharedMediaStream } from './media'
+import {
+  abortError,
+  createStationConnect,
+  statusFromPhase,
+} from './stationConnect'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null }
@@ -899,31 +904,77 @@ function RemoteCallView({ token }: { token: string }) {
   )
 }
 
+function clearStationMediaElements() {
+  document.querySelectorAll('audio').forEach((el) => {
+    if (el.style.display === 'none') try { el.remove() } catch {}
+  })
+  document.querySelectorAll('[id^="station-vid-"]').forEach((el) => {
+    try { (el as HTMLVideoElement).srcObject = null } catch {}
+  })
+}
+
 function StationView({ token, onToken, appName }: { token: string; onToken: (token: string) => void; appName: string }) {
   const [familyIdentities, setFamilyIdentities] = useState<string[]>([])
   const [lkStatus, setLkStatus] = useState<'waiting' | 'connecting' | 'connected' | 'error'>('waiting')
   const [time, setTime] = useState(new Date())
   const roomRef = useRef<Room | null>(null)
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const videoContainerRef = useRef<HTMLDivElement>(null)
-  const identity = useMemo(() => `station-${Math.random().toString(36).slice(2,10)}`, [])
+  const tokenRef = useRef(token)
+  const onTokenRef = useRef(onToken)
+  tokenRef.current = token
+  onTokenRef.current = onToken
 
   const tryFullscreen = useCallback(() => {
     const el = document.documentElement as any
     const rfs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen
     if (rfs) { try { rfs.call(el) } catch {} }
   }, [])
+  const tryFullscreenRef = useRef(tryFullscreen)
+  tryFullscreenRef.current = tryFullscreen
 
   useEffect(() => { const i = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(i) }, [])
 
   useEffect(() => {
+    let pendingRoom: Room | null = null
     let mounted = true
-    const connect = async () => {
-      try {
+
+    const cleanupRoom = () => {
+      const rooms = [roomRef.current, pendingRoom]
+      roomRef.current = null
+      pendingRoom = null
+      for (const room of rooms) {
+        if (!room) continue
+        try { room.disconnect() } catch {}
+      }
+      clearStationMediaElements()
+      if (mounted) setFamilyIdentities([])
+    }
+
+    const machine = createStationConnect({
+      waitForMedia: async (signal) => {
+        console.log('[MarshallCam] Station: waiting for camera permission...')
+        await getSharedMediaStream({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+        })
+        if (signal.aborted) throw abortError()
+      },
+      cleanup: cleanupRoom,
+      schedule: (delayMs, cb) => window.setTimeout(cb, delayMs),
+      cancel: (handle) => window.clearTimeout(handle),
+      onState: (state) => {
+        if (mounted) setLkStatus(statusFromPhase(state.phase))
+      },
+      connect: async ({ identity, generation, signal }) => {
         console.log('[MarshallCam] Station: fetching LiveKit token...')
-        setLkStatus('connecting')
-        const { token: lkToken, url, iceServers } = await fetchLiveKitToken(token, identity, { role: 'station', onToken })
+        const { token: lkToken, url, iceServers } = await fetchLiveKitToken(
+          tokenRef.current,
+          identity,
+          { role: 'station', onToken: (next) => onTokenRef.current(next) },
+        )
+        if (signal.aborted) throw abortError()
         console.log('[MarshallCam] Station: connecting to', url, 'with', iceServers?.length, 'ICE servers')
+
         const room = new Room({
           adaptiveStream: true,
           dynacast: true,
@@ -936,43 +987,49 @@ function StationView({ token, onToken, appName }: { token: string; onToken: (tok
             videoSimulcastLayers: [VideoPresets.h360, VideoPresets.h720, VideoPresets.h1080],
           },
         })
-        if (!mounted) return
-        roomRef.current = room
+        pendingRoom = room
+
+        const isThisRoom = () => pendingRoom === room || roomRef.current === room
+        const onAbort = () => {
+          try { room.disconnect() } catch {}
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
 
         room.on(RoomEvent.Connected, () => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: CONNECTED to LiveKit room')
-          setLkStatus('connected')
         })
 
         room.on(RoomEvent.Reconnecting, () => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: RECONNECTING...')
           setLkStatus('error')
         })
 
         room.on(RoomEvent.Reconnected, () => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: RECONNECTED')
           setLkStatus('connected')
         })
 
-        room.on(RoomEvent.Disconnected, () => {
-          console.log('[MarshallCam] Station: DISCONNECTED — will auto-reconnect')
-          setLkStatus('error')
-          setFamilyIdentities([])
-          document.querySelectorAll('audio').forEach(el => {
-            if (el.style.display === 'none') try { el.remove() } catch {}
-          })
-          document.querySelectorAll('[id^="station-vid-"]').forEach(el => {
-            try { (el as HTMLVideoElement).srcObject = null } catch {}
-          })
-          roomRef.current = null
-          if (mounted) reconnectRef.current = setTimeout(connect, 3000)
+        room.on(RoomEvent.Disconnected, (reason) => {
+          const current = isThisRoom()
+          console.log('[MarshallCam] Station: DISCONNECTED', reason)
+          machine.handleDisconnected(generation, reason)
+          if (!current) return
+          if (roomRef.current === room) roomRef.current = null
+          if (pendingRoom === room) pendingRoom = null
+          clearStationMediaElements()
+          if (mounted) setFamilyIdentities([])
         })
 
         room.on(RoomEvent.ConnectionQualityChanged, (quality) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: connection quality:', quality)
         })
 
         room.on(RoomEvent.DataReceived, (payload) => {
+          if (!isThisRoom()) return
           try {
             const msg = JSON.parse(new TextDecoder().decode(payload))
             if (msg.type === 'squeak') {
@@ -983,18 +1040,20 @@ function StationView({ token, onToken, appName }: { token: string; onToken: (tok
         })
 
         room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: participant connected:', participant.identity)
-          setFamilyIdentities(prev => [...prev.filter(id => id !== participant.identity), participant.identity])
-          tryFullscreen()
+          setFamilyIdentities((prev) => [...prev.filter((id) => id !== participant.identity), participant.identity])
+          tryFullscreenRef.current()
         })
 
         room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: participant disconnected:', participant.identity)
           const elId = `station-vid-${participant.identity}`
           const vidEl = document.getElementById(elId) as HTMLVideoElement | null
           if (vidEl) {
             try { vidEl.srcObject = null } catch {}
-            participant.getTrackPublications().forEach(pub => {
+            participant.getTrackPublications().forEach((pub) => {
               if (pub.videoTrack) try { pub.videoTrack.detach(vidEl) } catch {}
             })
           }
@@ -1002,17 +1061,19 @@ function StationView({ token, onToken, appName }: { token: string; onToken: (tok
           if (!r || r.remoteParticipants.size === 0) {
             setFamilyIdentities([])
           } else {
-            setFamilyIdentities(prev => prev.filter(id => id !== participant.identity))
+            setFamilyIdentities((prev) => prev.filter((id) => id !== participant.identity))
           }
         })
 
         room.on(RoomEvent.TrackSubscribed, (_track: Track, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: track subscribed, kind=', pub.kind, 'from', participant.identity, 'trackSid=', pub.trackSid)
           if (pub.kind === Track.Kind.Video && pub.videoTrack) {
             const vt = pub.videoTrack
-            setFamilyIdentities(prev => [...prev.filter(id => id !== participant.identity), participant.identity])
+            setFamilyIdentities((prev) => [...prev.filter((id) => id !== participant.identity), participant.identity])
             const elId = `station-vid-${participant.identity}`
             const tryAttach = () => {
+              if (!isThisRoom()) return
               const el = document.getElementById(elId) as HTMLVideoElement | null
               if (el) {
                 console.log('[MarshallCam] Station: attaching video for', participant.identity, 'to element', elId)
@@ -1031,6 +1092,7 @@ function StationView({ token, onToken, appName }: { token: string; onToken: (tok
         })
 
         room.on(RoomEvent.TrackUnsubscribed, (track: Track, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: track unsubscribed, kind=', pub.kind, 'from', participant.identity, 'trackSid=', pub.trackSid)
           if (pub.kind === Track.Kind.Video && pub.videoTrack) {
             const elId = `station-vid-${participant.identity}`
@@ -1041,48 +1103,61 @@ function StationView({ token, onToken, appName }: { token: string; onToken: (tok
             }
           }
           if (pub.kind === Track.Kind.Audio && track) {
-            try { track.detach().forEach(el => el.remove()) } catch {}
+            try { track.detach().forEach((el) => el.remove()) } catch {}
           }
         })
 
         room.on(RoomEvent.TrackMuted, (pub, participant) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: track muted, kind=', pub.kind, 'from', participant.identity)
         })
 
         room.on(RoomEvent.TrackUnmuted, (pub, participant) => {
+          if (!isThisRoom()) return
           console.log('[MarshallCam] Station: track unmuted, kind=', pub.kind, 'from', participant.identity)
         })
 
-        await room.connect(url, lkToken, { rtcConfig: { iceServers: iceServers || [] } })
-        console.log('[MarshallCam] Station: room.connect() resolved, identity=', room.localParticipant.identity)
-
         try {
-          console.log('[MarshallCam] Station: enabling camera and microphone...')
+          await room.connect(url, lkToken, { rtcConfig: { iceServers: iceServers || [] } })
+          if (signal.aborted) throw abortError()
+          console.log('[MarshallCam] Station: room.connect() resolved, identity=', room.localParticipant.identity)
+          console.log('[MarshallCam] Station: publishing camera and microphone...')
           await publishCachedMedia(room, { width: { ideal: 1920 }, height: { ideal: 1080 } })
+          if (signal.aborted) throw abortError()
           const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera)
           const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
           console.log('[MarshallCam] Station: camera published=', !!camPub?.track, 'mic published=', !!micPub?.track)
-        } catch (e: any) {
-          console.error('[MarshallCam] Station: camera/mic failed:', e.name, e.message)
+          roomRef.current = room
+          pendingRoom = null
+        } catch (error) {
+          machine.handleConnectError(generation, error)
+          if (pendingRoom === room) pendingRoom = null
+          if (roomRef.current === room) roomRef.current = null
+          try { room.disconnect() } catch {}
+          throw error
+        } finally {
+          signal.removeEventListener('abort', onAbort)
         }
-      } catch (e: any) {
-        console.error('[MarshallCam] Station: connection error:', e.message, e.stack)
-        setLkStatus('error')
-        setFamilyIdentities([])
-        document.querySelectorAll('audio').forEach(el => {
-          if (el.style.display === 'none') try { el.remove() } catch {}
-        })
-        if (mounted) reconnectRef.current = setTimeout(connect, 5000)
-      }
-    }
-    connect()
+      },
+    })
+
+    machine.start()
+    const onPageHide = () => machine.stop()
+    const onPageShow = () => machine.start()
+    const onVisibility = () => machine.handleVisibility(document.hidden)
+    window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('pageshow', onPageShow)
+    document.addEventListener('visibilitychange', onVisibility)
+    if (document.hidden) machine.handleVisibility(true)
+
     return () => {
       mounted = false
-      if (reconnectRef.current) clearTimeout(reconnectRef.current)
-      roomRef.current?.disconnect()
-      roomRef.current = null
+      window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('pageshow', onPageShow)
+      document.removeEventListener('visibilitychange', onVisibility)
+      machine.stop()
     }
-  }, [token, identity, tryFullscreen, onToken])
+  }, [])
 
   useEffect(() => {
     if (lkStatus !== 'connected') return

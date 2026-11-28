@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.1
+
+- Station LiveKit connect is a single-flight state machine: one attempt in flight, pending retry timers cancelled before a new one is scheduled, and `disconnected` events from superseded rooms are ignored.
+- Old `Room` instances are disconnected before a new join. Camera/mic permission is acquired before connecting to LiveKit.
+- Reconnect uses exponential backoff with jitter, capped at 60s. `DUPLICATE_IDENTITY` is treated as another session taking over and backs off instead of retrying immediately.
+- Retries stop on page hide/unload and resume on `pageshow`.
+- README screenshot placeholders live under `docs/screenshots/`.
+
 ## 3.0.0
 
 - Configuration via a project-root `.env` file (`src/env.ts`, `src/config.ts`). Secrets are no longer compiled into the server.
