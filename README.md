@@ -2,6 +2,14 @@
 
 Self-hosted two-way video intercom: a TV kiosk at home so you can see and talk to dogs or family from your phone.
 
+<p align="center">
+  <img src="docs/marshall.jpg" width="360" alt="Marshall Baney, a harlequin Great Dane, resting on a couch">
+</p>
+<p align="center">
+  <em>In memory of the best boy, Marshall Baney.</em><br>
+  MarshallCam is named after him.
+</p>
+
 The kiosk is a Mac mini (or any Mac) on HDMI, running a Safari Web App that publishes a USB webcam. Remotes are a PWA on phones. Media is [LiveKit](https://livekit.io/). The Node server issues tokens, serves the apps, and optionally talks to a Roku TV over ECP.
 
 ![Station standby](docs/screenshots/station.png)
